@@ -832,6 +832,65 @@ table.data-table td.wrap {
   margin-bottom: 4px;
 }
 
+/* 环境卫生量化记录 */
+.env-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+
+.env-summary {
+  margin: 16px 0;
+}
+
+.env-regression-banner {
+  margin: 8px 0 12px;
+}
+
+.env-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.env-metric {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.env-metric .label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.env-metric .value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.env-subscore {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.env-sub-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12.5px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     flex-direction: column;

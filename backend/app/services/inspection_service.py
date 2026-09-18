@@ -7,8 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import DomainError, NotFoundError
 from app.models import Inspection, Restroom
-from app.schemas.inspection import InspectionCreate, InspectionOut, InspectionUpdate
-from app.services import restroom_service, scoring
+from app.schemas.inspection import (
+    EnvironmentalOut,
+    InspectionCreate,
+    InspectionOut,
+    InspectionUpdate,
+)
+from app.services import environment, restroom_service, scoring
 
 SORTABLE_FIELDS = {
     "inspect_time": Inspection.inspect_time,
@@ -37,6 +42,51 @@ def _normalize_items(items: list) -> list[dict]:
     return normalized
 
 
+def _env_payload(env) -> dict | None:
+    """把入参环境指标转成可计算的字典；为空返回 None。"""
+    if env is None:
+        return None
+    data = env.model_dump()
+    for key in ("odor_level", "floor_condition", "ventilation"):
+        value = data.get(key)
+        data[key] = value.value if hasattr(value, "value") else value
+    return data
+
+
+def _apply_env(inspection: Inspection, env_data: dict | None) -> None:
+    """登记环境量化指标并计算环境卫生评价。"""
+    if env_data is None:
+        return
+    evaluated = environment.evaluate_env(env_data)
+    if evaluated is None:
+        raise DomainError("环境卫生指标不完整，无法计算评价")
+    env_score, env_grade, subscores = evaluated
+    inspection.odor_level = env_data["odor_level"]
+    inspection.floor_condition = env_data["floor_condition"]
+    inspection.temperature = float(env_data["temperature"])
+    inspection.humidity = float(env_data["humidity"])
+    inspection.ventilation = env_data["ventilation"]
+    inspection.disinfection_count = int(env_data["disinfection_count"])
+    inspection.env_score = env_score
+    inspection.env_grade = env_grade
+    inspection.env_subscores = subscores
+
+
+def _clear_env(inspection: Inspection) -> None:
+    for column in (
+        "odor_level",
+        "floor_condition",
+        "temperature",
+        "humidity",
+        "ventilation",
+        "disinfection_count",
+        "env_score",
+        "env_grade",
+        "env_subscores",
+    ):
+        setattr(inspection, column, None)
+
+
 def get_inspection(db: Session, inspection_id: int) -> Inspection:
     inspection = db.get(Inspection, inspection_id)
     if inspection is None:
@@ -44,9 +94,85 @@ def get_inspection(db: Session, inspection_id: int) -> Inspection:
     return inspection
 
 
-def to_out(inspection: Inspection) -> InspectionOut:
+def _build_env_out(inspection: Inspection) -> EnvironmentalOut | None:
+    if inspection.env_score is None or inspection.odor_level is None:
+        return None
+    return EnvironmentalOut(
+        odor_level=inspection.odor_level,
+        floor_condition=inspection.floor_condition,
+        temperature=inspection.temperature,
+        humidity=inspection.humidity,
+        ventilation=inspection.ventilation,
+        disinfection_count=inspection.disinfection_count,
+        env_score=inspection.env_score,
+        env_grade=inspection.env_grade,
+        subscores=inspection.env_subscores or {},
+    )
+
+
+def previous_inspection(db: Session, inspection: Inspection) -> Inspection | None:
+    """同一公厕、巡查时间早于当前记录的最近一条记录。"""
+    same_time_stmt = (
+        select(Inspection)
+        .where(
+            Inspection.restroom_id == inspection.restroom_id,
+            Inspection.inspect_time == inspection.inspect_time,
+            Inspection.id < inspection.id,
+        )
+        .order_by(Inspection.id.desc())
+        .limit(1)
+    )
+    earlier = db.scalars(same_time_stmt).first()
+    if earlier is not None:
+        return earlier
+    stmt = (
+        select(Inspection)
+        .where(
+            Inspection.restroom_id == inspection.restroom_id,
+            Inspection.inspect_time < inspection.inspect_time,
+        )
+        .order_by(Inspection.inspect_time.desc(), Inspection.id.desc())
+        .limit(1)
+    )
+    return db.scalars(stmt).first()
+
+
+def build_prev_map(db: Session, rows: list[Inspection]) -> dict[int, Inspection]:
+    """批量求一批巡查记录各自的上一条同公厕记录，避免逐条查询。"""
+    target_ids = {row.id for row in rows}
+    if not target_ids:
+        return {}
+    restroom_ids = {row.restroom_id for row in rows}
+    candidates = list(
+        db.scalars(
+            select(Inspection)
+            .where(Inspection.restroom_id.in_(restroom_ids))
+            .order_by(Inspection.inspect_time.asc(), Inspection.id.asc())
+        )
+    )
+    prev_by_id: dict[int, Inspection] = {}
+    last_seen: dict[int, Inspection] = {}
+    for candidate in candidates:
+        if candidate.id in target_ids:
+            prev_by_id[candidate.id] = last_seen.get(candidate.restroom_id)
+        last_seen[candidate.restroom_id] = candidate
+    return prev_by_id
+
+
+def to_out(inspection: Inspection, previous: Inspection | None = None) -> InspectionOut:
     data = InspectionOut.model_validate(inspection)
     data.issue_count = len(inspection.issues)
+    data.env = _build_env_out(inspection)
+    if previous is not None:
+        data.prev_env_score = previous.env_score
+        data.prev_env_grade = previous.env_grade
+        data.prev_inspect_time = previous.inspect_time
+        data.env_regressed = environment.is_regression(
+            inspection.env_score,
+            inspection.env_grade,
+            previous.env_score,
+            previous.env_grade,
+        )
     return data
 
 
@@ -58,6 +184,7 @@ def list_inspections(
     inspector: str | None = None,
     shift: str | None = None,
     result: str | None = None,
+    env_grade: str | None = None,
     keyword: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
@@ -79,6 +206,8 @@ def list_inspections(
         stmt = stmt.where(Inspection.shift == shift)
     if result:
         stmt = stmt.where(Inspection.result == result)
+    if env_grade:
+        stmt = stmt.where(Inspection.env_grade == env_grade)
     if date_from:
         stmt = stmt.where(Inspection.inspect_time >= datetime.combine(date_from, time.min))
     if date_to:
@@ -115,6 +244,7 @@ def create_inspection(db: Session, payload: InspectionCreate) -> Inspection:
         result=result,
         remark=payload.remark,
     )
+    _apply_env(inspection, _env_payload(payload.env))
     db.add(inspection)
     db.commit()
     db.refresh(inspection)
@@ -132,6 +262,11 @@ def update_inspection(db: Session, inspection_id: int, payload: InspectionUpdate
         inspection.score = score
         inspection.grade = grade
         inspection.result = result
+    if "env" in data:
+        if payload.env is None:
+            _clear_env(inspection)
+        else:
+            _apply_env(inspection, _env_payload(payload.env))
     if data.get("inspector") is not None:
         inspection.inspector = payload.inspector or inspection.inspector
     if data.get("shift") is not None and payload.shift is not None:

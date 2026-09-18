@@ -56,3 +56,37 @@ def init_db() -> None:
     from app import models  # noqa: F401  确保模型完成注册
 
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
+
+
+def _ensure_columns() -> None:
+    """对已存在的表做幂等的「补列」迁移。
+
+    项目默认用 create_all 建表，不会给老库追加新列。环境卫生记录新增了若干
+    可空列，这里在启动时检测并按 ADD COLUMN 补齐，避免要求手动删库重建。
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        existing = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing:
+                continue
+            column_type = column.type.compile(engine.dialect)
+            nullable = "" if column.nullable else " NOT NULL"
+            default = ""
+            if column.default is not None and column.default.arg is not None:
+                literal = column.default.arg
+                if isinstance(literal, str):
+                    default = f" DEFAULT '{literal}'"
+                elif isinstance(literal, bool):
+                    default = f" DEFAULT {1 if literal else 0}"
+                else:
+                    default = f" DEFAULT {literal}"
+            with engine.begin() as connection:
+                connection.execute(
+                    text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column_type}{nullable}{default}")
+                )

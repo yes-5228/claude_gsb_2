@@ -28,3 +28,12 @@ export function GradeTag({ grade }) {
           : 'tag-danger';
   return <span className={`tag ${tone}`}>{grade || '未评级'}</span>;
 }
+
+export function RegressionTag({ regressed, title }) {
+  if (!regressed) return null;
+  return (
+    <span className="tag tag-danger" title={title}>
+      环境退步
+    </span>
+  );
+}

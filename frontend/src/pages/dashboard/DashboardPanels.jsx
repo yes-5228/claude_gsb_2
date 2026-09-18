@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 
 import BarList from '../../components/BarList.jsx';
 import DataTable from '../../components/DataTable.jsx';
-import { ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
+import { RegressionTag, ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
 import { formatDateTime } from '../../utils/format.js';
 
 const STATUS_COLORS = {
@@ -164,6 +164,19 @@ export function RecentInspectionsPanel({ items }) {
           { key: 'inspector', title: '巡查人' },
           { key: 'shift', title: '班次' },
           { key: 'score', title: '得分', render: (row) => <ScorePill score={row.score} /> },
+          {
+            key: 'env',
+            title: '环境卫生',
+            render: (row) =>
+              row.env_score == null ? (
+                <span className="muted">-</span>
+              ) : (
+                <div className="inline">
+                  <ScorePill score={row.env_score} />
+                  <RegressionTag regressed={row.env_regressed} title="较上一次明显退步" />
+                </div>
+              ),
+          },
           { key: 'result', title: '结论', render: (row) => <StatusTag status={row.result} /> },
           { key: 'inspect_time', title: '巡查时间', render: (row) => formatDateTime(row.inspect_time) },
         ]}

@@ -7,7 +7,7 @@ import DataTable from '../../components/DataTable.jsx';
 import Field from '../../components/Field.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
-import { GradeTag, ScorePill, StatusTag } from '../../components/Tags.jsx';
+import { GradeTag, RegressionTag, ScorePill, StatusTag } from '../../components/Tags.jsx';
 import { useToast } from '../../components/Toast.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
 import { useDictionaries } from '../../hooks/useDictionaries.js';
@@ -21,6 +21,7 @@ const DEFAULT_FILTERS = {
   district: '',
   shift: '',
   result: '',
+  env_grade: '',
   date_from: '',
   date_to: '',
 };
@@ -99,6 +100,18 @@ export default function InspectionListPage() {
                 <option value="发现问题">发现问题</option>
               </select>
             </Field>
+            <Field label="环境评价">
+              <select
+                value={list.filters.env_grade}
+                onChange={(event) => list.updateFilter('env_grade', event.target.value)}
+              >
+                <option value="">全部</option>
+                <option value="优秀">优秀</option>
+                <option value="良好">良好</option>
+                <option value="合格">合格</option>
+                <option value="不合格">不合格</option>
+              </select>
+            </Field>
             <Field label="开始日期">
               <input
                 type="date"
@@ -147,6 +160,20 @@ export default function InspectionListPage() {
               { key: 'score', title: '得分', render: (row) => <ScorePill score={row.score} /> },
               { key: 'grade', title: '等级', render: (row) => <GradeTag grade={row.grade} /> },
               { key: 'result', title: '结论', render: (row) => <StatusTag status={row.result} /> },
+              {
+                key: 'env',
+                title: '环境卫生',
+                render: (row) =>
+                  row.env_score == null ? (
+                    <span className="muted">未登记</span>
+                  ) : (
+                    <div className="inline">
+                      <ScorePill score={row.env_score} />
+                      <GradeTag grade={row.env_grade} />
+                      <RegressionTag regressed={row.env_regressed} title="较上一次记录明显退步" />
+                    </div>
+                  ),
+              },
               { key: 'issue_count', title: '关联问题' },
               {
                 key: 'actions',

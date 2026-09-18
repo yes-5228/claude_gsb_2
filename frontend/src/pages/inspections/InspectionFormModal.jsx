@@ -2,13 +2,24 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { inspectionApi } from '../../api/inspections.js';
 import { metaApi } from '../../api/meta.js';
+import EnvFields from '../../components/EnvFields.jsx';
 import Field from '../../components/Field.jsx';
 import Modal from '../../components/Modal.jsx';
 import { GradeTag, StatusTag } from '../../components/Tags.jsx';
 import { useToast } from '../../components/Toast.jsx';
 import { useDictionaries } from '../../hooks/useDictionaries.js';
+import { calcEnvScore, envGradeOf, hasEnv } from '../../utils/environment.js';
 import { calcScore, gradeOf, resultOf } from '../../utils/scoring.js';
 import { toDateTimeInput } from '../../utils/format.js';
+
+const EMPTY_ENV = {
+  odor_level: '',
+  floor_condition: '',
+  temperature: '',
+  humidity: '',
+  ventilation: '',
+  disinfection_count: '',
+};
 
 export default function InspectionFormModal({ defaultRestroomId, onClose, onSaved }) {
   const { dictionaries } = useDictionaries();
@@ -24,6 +35,7 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
     remark: '',
   });
   const [items, setItems] = useState([]);
+  const [env, setEnv] = useState(EMPTY_ENV);
 
   useEffect(() => {
     metaApi
@@ -40,6 +52,10 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
   const score = useMemo(() => calcScore(items), [items]);
   const grade = gradeOf(score);
   const result = resultOf(items, score);
+
+  const envComplete = hasEnv(env);
+  const envScore = useMemo(() => (envComplete ? calcEnvScore(env) : null), [env, envComplete]);
+  const envGrade = envScore == null ? null : envGradeOf(envScore);
 
   const setItemScore = (index, value) => {
     setItems((prev) =>
@@ -63,6 +79,12 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
       setError('请填写巡查人');
       return;
     }
+    // 环境指标要么不登记，要么填全（避免只有部分数值无法评价）
+    const partiallyFilled = !envComplete && Object.values(env).some((v) => v !== '');
+    if (partiallyFilled) {
+      setError('环境卫生指标请填写完整（异味、地面、温湿度、通风、消杀频次）');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -71,6 +93,14 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
         restroom_id: Number(form.restroom_id),
         inspect_time: form.inspect_time ? new Date(form.inspect_time).toISOString() : null,
         items,
+        env: envComplete
+          ? {
+              ...env,
+              temperature: Number(env.temperature),
+              humidity: Number(env.humidity),
+              disinfection_count: Number(env.disinfection_count),
+            }
+          : null,
       });
       toast.success('巡查记录已提交');
       onSaved();
@@ -181,6 +211,35 @@ export default function InspectionFormModal({ defaultRestroomId, onClose, onSave
           </div>
         ))}
       </div>
+
+      <div className="card-title">
+        <div className="inline">
+          <h3>环境卫生量化登记</h3>
+          {envScore == null ? (
+            <span className="tag tag-neutral">未登记环境指标</span>
+          ) : (
+            <>
+              <span className="tag tag-primary">环境评价 {envScore.toFixed(1)}</span>
+              <GradeTag grade={envGrade} />
+            </>
+          )}
+        </div>
+        {envComplete ? (
+          <button type="button" className="btn btn-sm" onClick={() => setEnv(EMPTY_ENV)}>
+            清空环境指标
+          </button>
+        ) : null}
+      </div>
+      {envComplete ? (
+        <p className="muted" style={{ marginTop: -4 }}>
+          异味、地面干湿、温湿度、通风与消杀频次将自动折算环境卫生评价（{envGrade}）。
+        </p>
+      ) : (
+        <p className="muted" style={{ marginTop: -4 }}>
+          可选填写；如需记录环境卫生，请将下列指标填写完整。
+        </p>
+      )}
+      <EnvFields value={env} onChange={setEnv} dictionaries={dictionaries} />
 
       <Field label="巡查备注" full>
         <textarea

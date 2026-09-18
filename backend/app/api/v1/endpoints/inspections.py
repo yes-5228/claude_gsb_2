@@ -24,6 +24,7 @@ def list_inspections(
     inspector: Annotated[str | None, Query(description="巡查人")] = None,
     shift: Annotated[str | None, Query(description="班次")] = None,
     result: Annotated[str | None, Query(description="巡查结论")] = None,
+    env_grade: Annotated[str | None, Query(description="环境卫生评价等级")] = None,
     keyword: Annotated[str | None, Query(description="公厕名称/备注模糊搜索")] = None,
     date_from: Annotated[date | None, Query(description="开始日期")] = None,
     date_to: Annotated[date | None, Query(description="结束日期")] = None,
@@ -37,6 +38,7 @@ def list_inspections(
         inspector=inspector,
         shift=shift,
         result=result,
+        env_grade=env_grade,
         keyword=keyword,
         date_from=date_from,
         date_to=date_to,
@@ -45,8 +47,11 @@ def list_inspections(
         sort_by=sort_by,
         order=order,
     )
+    prev_map = inspection_service.build_prev_map(db, rows)
     return Page[InspectionOut](
-        items=[inspection_service.to_out(row) for row in rows],
+        items=[
+            inspection_service.to_out(row, previous=prev_map.get(row.id)) for row in rows
+        ],
         meta=build_meta(total, pagination),
     )
 
@@ -55,21 +60,25 @@ def list_inspections(
 def create_inspection(
     payload: InspectionCreate, db: Annotated[Session, Depends(get_db)]
 ) -> InspectionOut:
-    return inspection_service.to_out(inspection_service.create_inspection(db, payload))
+    inspection = inspection_service.create_inspection(db, payload)
+    previous = inspection_service.previous_inspection(db, inspection)
+    return inspection_service.to_out(inspection, previous=previous)
 
 
 @router.get("/{inspection_id}", response_model=InspectionOut, summary="巡查记录详情")
 def get_inspection(inspection_id: int, db: Annotated[Session, Depends(get_db)]) -> InspectionOut:
-    return inspection_service.to_out(inspection_service.get_inspection(db, inspection_id))
+    inspection = inspection_service.get_inspection(db, inspection_id)
+    previous = inspection_service.previous_inspection(db, inspection)
+    return inspection_service.to_out(inspection, previous=previous)
 
 
 @router.patch("/{inspection_id}", response_model=InspectionOut, summary="更新巡查记录")
 def update_inspection(
     inspection_id: int, payload: InspectionUpdate, db: Annotated[Session, Depends(get_db)]
 ) -> InspectionOut:
-    return inspection_service.to_out(
-        inspection_service.update_inspection(db, inspection_id, payload)
-    )
+    inspection = inspection_service.update_inspection(db, inspection_id, payload)
+    previous = inspection_service.previous_inspection(db, inspection)
+    return inspection_service.to_out(inspection, previous=previous)
 
 
 @router.delete("/{inspection_id}", response_model=MessageOut, summary="删除巡查记录")

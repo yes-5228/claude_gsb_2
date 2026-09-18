@@ -24,6 +24,9 @@ class OverviewStats(BaseModel):
     issue_overdue: int = 0
     issue_done_this_month: int = 0
     rectification_rate: float = Field(default=0.0, description="整改完成率（百分比）")
+    env_record_total: int = Field(default=0, description="含环境卫生记录的巡查条数")
+    env_regression_restrooms: int = Field(default=0, description="环境卫生明显退步的公厕数")
+    avg_env_score_week: float = Field(default=0.0, description="近 7 天环境卫生均分")
 
 
 class TrendPoint(BaseModel):

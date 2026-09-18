@@ -8,15 +8,18 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import (
     INSPECTION_CHECK_ITEMS,
+    FloorCondition,
     IssueCategory,
     IssueSeverity,
     IssueStatus,
+    OdorLevel,
     RestroomGrade,
     RestroomStatus,
     Shift,
+    VentilationStatus,
 )
 from app.models import Restroom
-from app.schemas.inspection import InspectionCreate, InspectionItem
+from app.schemas.inspection import EnvironmentalMetrics, InspectionCreate, InspectionItem
 from app.schemas.issue import IssueCreate, IssueStatusUpdate
 from app.schemas.restroom import RestroomCreate
 from app.services import inspection_service, issue_service, restroom_service
@@ -97,6 +100,71 @@ def _pick_problem(items: list[InspectionItem]) -> str | None:
     return min(pool, key=lambda item: item.score).name
 
 
+def _pick_level(level: int, options: tuple) -> object:
+    return options[min(max(level, 0), len(options) - 1)]
+
+
+def _build_env(rng: random.Random, quality: float) -> EnvironmentalMetrics:
+    """按保洁质量生成一份环境卫生量化记录，质量越差各项指标越差。"""
+    severity = max(0.0, min(1.0, (9.4 - quality) / 4.0)) + rng.uniform(-0.12, 0.12)
+    severity = max(0.0, min(1.0, severity))
+    level = min(3, int(severity * 4))
+    odor = _pick_level(level, tuple(OdorLevel))
+    floor = _pick_level(level, tuple(FloorCondition))
+    ventilation = _pick_level(level, tuple(VentilationStatus))
+    # 温度：基本在适宜区间，质量差时更极端
+    temperature = round(rng.uniform(20, 25) + (severity - 0.3) * 14, 1)
+    humidity = round(rng.uniform(45, 65) + (severity - 0.3) * 45, 1)
+    disinfection = int(round(max(0, min(5, 4 - severity * 4 + rng.uniform(-0.4, 0.4)))))
+    return EnvironmentalMetrics(
+        odor_level=odor,
+        floor_condition=floor,
+        temperature=temperature,
+        humidity=max(0.0, min(100.0, humidity)),
+        ventilation=ventilation,
+        disinfection_count=disinfection,
+    )
+
+
+def _env_by_level(level: int) -> EnvironmentalMetrics:
+    """确定性的环境指标：0 优秀 … 3 不合格，用于构造明显退步的台账。"""
+    presets = {
+        0: EnvironmentalMetrics(
+            odor_level=OdorLevel.NONE,
+            floor_condition=FloorCondition.DRY,
+            temperature=23.0,
+            humidity=55.0,
+            ventilation=VentilationStatus.GOOD,
+            disinfection_count=3,
+        ),
+        1: EnvironmentalMetrics(
+            odor_level=OdorLevel.MILD,
+            floor_condition=FloorCondition.DAMP,
+            temperature=27.0,
+            humidity=60.0,
+            ventilation=VentilationStatus.NORMAL,
+            disinfection_count=2,
+        ),
+        2: EnvironmentalMetrics(
+            odor_level=OdorLevel.OBVIOUS,
+            floor_condition=FloorCondition.WET,
+            temperature=30.0,
+            humidity=72.0,
+            ventilation=VentilationStatus.POOR,
+            disinfection_count=1,
+        ),
+        3: EnvironmentalMetrics(
+            odor_level=OdorLevel.STRONG,
+            floor_condition=FloorCondition.DIRTY,
+            temperature=38.0,
+            humidity=92.0,
+            ventilation=VentilationStatus.POOR,
+            disinfection_count=0,
+        ),
+    }
+    return presets[min(max(level, 0), 3)]
+
+
 def seed_database(db: Session, *, reset: bool = False) -> int:
     """写入演示数据，返回新增的问题条数；已有数据时默认跳过。"""
     existing = db.scalar(select(func.count()).select_from(Restroom)) or 0
@@ -129,10 +197,18 @@ def seed_database(db: Session, *, reset: bool = False) -> int:
     quality_by_restroom = {room.id: rng.uniform(7.4, 9.8) for room in restrooms}
     inspection_ids: list[tuple[int, int]] = []  # (restroom_id, inspection_id)
 
+    # 选取一座公厕在近 3 天连续记录环境卫生退步，便于台账呈现退步标记
+    declining_restroom = next(
+        (room for room in restrooms if room.status == RestroomStatus.NORMAL), restrooms[0]
+    )
+
     for offset in range(13, -1, -1):
         day = now - timedelta(days=offset)
         for room in restrooms:
             if room.status == RestroomStatus.CLOSED:
+                continue
+            # 近 3 天的重点公厕由下方专项记录覆盖，保证退步序列连续可对照
+            if room.id == declining_restroom.id and offset <= 2:
                 continue
             if rng.random() < 0.3:
                 continue
@@ -150,10 +226,29 @@ def seed_database(db: Session, *, reset: bool = False) -> int:
                         hour=rng.choice([8, 10, 14, 16, 19]), minute=rng.choice([5, 20, 35, 50])
                     ),
                     items=items,
+                    env=_build_env(rng, quality),
                     remark=None,
                 ),
             )
             inspection_ids.append((room.id, inspection.id))
+
+    # 近 3 天为重点公厕插入「环境卫生逐级退步」的巡查记录（时间最晚，成为其最新记录）
+    for offset, env_level in ((2, 0), (1, 2), (0, 3)):
+        day = now - timedelta(days=offset)
+        quality = 9.2 if env_level == 0 else (5.6 if env_level == 2 else 3.6)
+        inspection = inspection_service.create_inspection(
+            db,
+            InspectionCreate(
+                restroom_id=declining_restroom.id,
+                inspector=rng.choice(INSPECTORS),
+                shift=Shift.MIDDLE,
+                inspect_time=day.replace(hour=20, minute=10),
+                items=_build_items(rng, quality),
+                env=_env_by_level(env_level),
+                remark="环境卫生专项巡查" if env_level == 3 else None,
+            ),
+        )
+        inspection_ids.append((declining_restroom.id, inspection.id))
 
     created = 0
     for restroom_id, inspection_id in inspection_ids:

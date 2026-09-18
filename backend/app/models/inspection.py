@@ -30,6 +30,28 @@ class Inspection(Base):
     result: Mapped[str] = mapped_column(
         String(20), default=InspectionResult.NORMAL.value, index=True, comment="巡查结论"
     )
+    # 环境卫生量化记录
+    odor_level: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="异味等级")
+    floor_condition: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="地面干湿情况"
+    )
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True, comment="温度(℃)")
+    humidity: Mapped[float | None] = mapped_column(Float, nullable=True, comment="相对湿度(%)")
+    ventilation: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="通风状态"
+    )
+    disinfection_count: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, comment="当日消杀频次(次/日)"
+    )
+    env_score: Mapped[float | None] = mapped_column(
+        Float, nullable=True, comment="环境卫生评价分"
+    )
+    env_grade: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, comment="环境卫生评价等级"
+    )
+    env_subscores: Mapped[dict | None] = mapped_column(
+        JSON, nullable=True, comment="环境卫生各指标子分"
+    )
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="巡查备注")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 

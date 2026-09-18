@@ -22,7 +22,7 @@ from app.schemas.stats import (
     RestroomRankItem,
     TrendPoint,
 )
-from app.services import inspection_service, issue_service
+from app.services import inspection_service, issue_service, restroom_service
 
 
 def _count(db: Session, model, *conditions) -> int:
@@ -74,6 +74,20 @@ def overview(db: Session) -> OverviewStats:
             db, Issue, Issue.status == IssueStatus.DONE.value, Issue.updated_at >= month_start
         ),
         rectification_rate=round(finished / issue_total * 100, 1) if issue_total else 0.0,
+        env_record_total=_count(db, Inspection, Inspection.env_score.is_not(None)),
+        env_regression_restrooms=restroom_service.count_restrooms_with_env_regression(db),
+        avg_env_score_week=round(
+            float(
+                db.scalar(
+                    select(func.avg(Inspection.env_score)).where(
+                        Inspection.inspect_time >= week_start,
+                        Inspection.env_score.is_not(None),
+                    )
+                )
+                or 0.0
+            ),
+            1,
+        ),
     )
 
 
@@ -232,6 +246,7 @@ def dashboard(db: Session, trend_days: int = 14) -> DashboardStats:
     recent_inspections, _ = inspection_service.list_inspections(
         db, page=1, page_size=5, sort_by="inspect_time"
     )
+    recent_prev = inspection_service.build_prev_map(db, recent_inspections)
     return DashboardStats(
         overview=overview(db),
         issue_by_status=issue_by_status(db),
@@ -241,5 +256,8 @@ def dashboard(db: Session, trend_days: int = 14) -> DashboardStats:
         districts=district_stats(db),
         top_restrooms=restroom_ranking(db),
         recent_issues=[issue_service.to_out(issue) for issue in recent_issues],
-        recent_inspections=[inspection_service.to_out(item) for item in recent_inspections],
+        recent_inspections=[
+            inspection_service.to_out(item, previous=recent_prev.get(item.id))
+            for item in recent_inspections
+        ],
     )

@@ -6,7 +6,7 @@ import DataTable from '../../components/DataTable.jsx';
 import Field from '../../components/Field.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
-import { StatusTag } from '../../components/Tags.jsx';
+import { GradeTag, RegressionTag, ScorePill, StatusTag } from '../../components/Tags.jsx';
 import { useToast } from '../../components/Toast.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
 import { useDictionaries } from '../../hooks/useDictionaries.js';
@@ -119,11 +119,33 @@ export default function RestroomListPage() {
               {
                 key: 'name',
                 title: '公厕名称',
-                render: (row) => <Link to={`/restrooms/${row.id}`}>{row.name}</Link>,
+                render: (row) => (
+                  <div className="inline">
+                    <Link to={`/restrooms/${row.id}`}>{row.name}</Link>
+                    <RegressionTag regressed={row.env_regressed} title="最近环境卫生较上一次明显退步" />
+                  </div>
+                ),
               },
               { key: 'district', title: '区域' },
               { key: 'grade', title: '等级' },
               { key: 'status', title: '状态', render: (row) => <StatusTag status={row.status} /> },
+              {
+                key: 'env',
+                title: '最近环境卫生',
+                render: (row) =>
+                  row.latest_env_score == null ? (
+                    <span className="muted">无记录</span>
+                  ) : (
+                    <div className="inline">
+                      <ScorePill score={row.latest_env_score} />
+                      <GradeTag grade={row.latest_env_grade} />
+                      <RegressionTag
+                        regressed={row.env_regressed}
+                        title={`较上一次环境记录明显退步（${row.latest_env_grade}）`}
+                      />
+                    </div>
+                  ),
+              },
               { key: 'manager', title: '责任人' },
               { key: 'manager_phone', title: '联系电话' },
               { key: 'open_hours', title: '开放时间' },

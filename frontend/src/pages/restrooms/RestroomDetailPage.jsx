@@ -8,7 +8,7 @@ import DataTable from '../../components/DataTable.jsx';
 import DetailList from '../../components/DetailList.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
-import { ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
+import { GradeTag, RegressionTag, ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
 import { useListQuery } from '../../hooks/useListQuery.js';
 import { formatDateTime } from '../../utils/format.js';
@@ -62,6 +62,20 @@ export default function RestroomDetailPage() {
 
         {restroom ? (
           <>
+            {restroom.env_regressed ? (
+              <div className="alert alert-error">
+                环境卫生预警：最近一次评价
+                {restroom.latest_env_score != null
+                  ? ` ${restroom.latest_env_score.toFixed(1)} 分（${restroom.latest_env_grade}）`
+                  : ''}
+                ，较上一次记录（
+                {restroom.prev_env_score != null
+                  ? `${restroom.prev_env_score.toFixed(1)} 分（${restroom.prev_env_grade}）`
+                  : '-'}
+                ）明显退步，已在台账中标记；累计退步 {restroom.env_regression_count} 次。
+              </div>
+            ) : null}
+
             <div className="stat-grid">
               <div className="stat-card">
                 <div className="label">累计巡查</div>
@@ -81,6 +95,27 @@ export default function RestroomDetailPage() {
                 </div>
                 <div className="foot">
                   最近得分：{restroom.latest_inspection_score ?? '-'}
+                </div>
+              </div>
+              <div
+                className={`stat-card${
+                  restroom.latest_env_score != null && restroom.latest_env_score < 60
+                    ? ' is-danger'
+                    : ''
+                }`}
+              >
+                <div className="label">
+                  最近环境卫生{' '}
+                  <RegressionTag regressed={restroom.env_regressed} title="较上一次明显退步" />
+                </div>
+                <div className="value">
+                  {restroom.latest_env_score != null ? restroom.latest_env_score.toFixed(1) : '-'}
+                  <span className="unit">分</span>
+                </div>
+                <div className="foot">
+                  {restroom.latest_env_grade
+                    ? `${restroom.latest_env_grade} · ${formatDateTime(restroom.latest_env_time)}`
+                    : '暂无环境记录'}
                 </div>
               </div>
               <div className={`stat-card${restroom.open_issue_count ? ' is-danger' : ''}`}>
@@ -150,6 +185,20 @@ export default function RestroomDetailPage() {
                     { key: 'inspector', title: '巡查人' },
                     { key: 'shift', title: '班次' },
                     { key: 'score', title: '得分', render: (row) => <ScorePill score={row.score} /> },
+                    {
+                      key: 'env',
+                      title: '环境卫生',
+                      render: (row) =>
+                        row.env_score == null ? (
+                          <span className="muted">-</span>
+                        ) : (
+                          <div className="inline">
+                            <ScorePill score={row.env_score} />
+                            <GradeTag grade={row.env_grade} />
+                            <RegressionTag regressed={row.env_regressed} title="较上一次明显退步" />
+                          </div>
+                        ),
+                    },
                     { key: 'result', title: '结论', render: (row) => <StatusTag status={row.result} /> },
                     { key: 'remark', title: '备注', wrap: true, render: (row) => row.remark || '-' },
                   ]}

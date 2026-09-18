@@ -43,7 +43,7 @@ def list_restrooms(
         order=order,
     )
     return Page[RestroomOut](
-        items=[RestroomOut.model_validate(row) for row in rows],
+        items=restroom_service.enrich_env_summary(db, rows),
         meta=build_meta(total, pagination),
     )
 

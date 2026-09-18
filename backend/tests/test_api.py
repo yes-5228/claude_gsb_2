@@ -5,6 +5,32 @@ from datetime import datetime, timedelta
 from tests.conftest import full_items
 
 
+def good_env(**overrides) -> dict:
+    payload = {
+        "odor_level": "无异味",
+        "floor_condition": "干燥洁净",
+        "temperature": 23.0,
+        "humidity": 55.0,
+        "ventilation": "通风良好",
+        "disinfection_count": 3,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def bad_env(**overrides) -> dict:
+    payload = {
+        "odor_level": "强烈刺鼻",
+        "floor_condition": "积水污渍",
+        "temperature": 38.0,
+        "humidity": 92.0,
+        "ventilation": "通风不良",
+        "disinfection_count": 0,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_health_and_dictionaries(client):
     assert client.get("/health").json()["status"] == "ok"
     payload = client.get("/api/v1/meta/dictionaries").json()
@@ -223,3 +249,101 @@ def test_dashboard_stats(client, restroom):
     }
     assert payload["top_restrooms"]
     assert "rectification_rate" in overview
+
+
+def test_environmental_recording_and_evaluation(client, restroom):
+    dicts = client.get("/api/v1/meta/dictionaries").json()
+    assert dicts["odor_levels"][0] == "无异味"
+    assert dicts["floor_conditions"]
+    assert dicts["ventilation_statuses"]
+    assert dicts["env_limits"]["regression_delta"] == 15.0
+
+    created = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "环境巡查员",
+            "shift": "早班",
+            "items": full_items(9),
+            "env": good_env(),
+        },
+    )
+    assert created.status_code == 201, created.text
+    record = created.json()
+    assert record["env"] is not None
+    assert record["env"]["env_score"] == 100.0
+    assert record["env"]["env_grade"] == "优秀"
+    # 首条记录没有上一次可对比，不标记退步
+    assert record["env_regressed"] is False
+    assert record["prev_env_score"] is None
+
+    # 非法温湿度被参数校验拦截
+    invalid = client.post(
+        "/api/v1/inspections",
+        json={
+            "restroom_id": restroom["id"],
+            "inspector": "环境巡查员",
+            "items": full_items(8),
+            "env": good_env(humidity=150),
+        },
+    )
+    assert invalid.status_code == 422
+
+
+def test_environmental_regression_flag_and_ledger(client, restroom):
+    base = datetime.now() - timedelta(days=3)
+
+    def post(env, when):
+        return client.post(
+            "/api/v1/inspections",
+            json={
+                "restroom_id": restroom["id"],
+                "inspector": "环境巡查员",
+                "items": full_items(9 if env == good_env() else 6),
+                "env": env,
+                "inspect_time": when.isoformat(),
+            },
+        ).json()
+
+    first = post(good_env(), base)
+    second = post(good_env(temperature=24.5), base + timedelta(days=1))
+    assert second["prev_env_score"] == 100.0
+    assert second["env_regressed"] is False
+
+    # 第三次明显恶化：应标记退步并带上上次评分
+    third = post(bad_env(), base + timedelta(days=2))
+    assert third["env_regressed"] is True
+    assert third["prev_env_grade"] == "优秀"
+    assert third["env"]["env_grade"] == "不合格"
+
+    # 列表中的最新记录同样带退步标记
+    listed = client.get(
+        "/api/v1/inspections", params={"restroom_id": restroom["id"], "order": "desc"}
+    ).json()
+    latest = listed["items"][0]
+    assert latest["id"] == third["id"]
+    assert latest["env_regressed"] is True
+    assert latest["env_grade"] == "不合格"
+
+    # 可按环境等级筛选
+    fail_only = client.get(
+        "/api/v1/inspections", params={"restroom_id": restroom["id"], "env_grade": "不合格"}
+    ).json()
+    assert fail_only["meta"]["total"] == 1
+
+    # 台账列表与详情同步标记退步
+    ledger = client.get("/api/v1/restrooms", params={"keyword": restroom["name"]}).json()
+    row = next(item for item in ledger["items"] if item["id"] == restroom["id"])
+    assert row["env_regressed"] is True
+    assert row["latest_env_grade"] == "不合格"
+
+    detail = client.get(f"/api/v1/restrooms/{restroom['id']}").json()
+    assert detail["env_regressed"] is True
+    assert detail["latest_env_score"] == third["env"]["env_score"]
+    assert detail["prev_env_grade"] == "优秀"
+    assert detail["env_regression_count"] >= 1
+
+    # 看板统计退步公厕与环境记录数
+    overview = client.get("/api/v1/stats/overview").json()
+    assert overview["env_record_total"] >= 3
+    assert overview["env_regression_restrooms"] >= 1

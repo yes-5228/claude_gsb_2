@@ -92,6 +92,20 @@ export default function DashboardPage() {
                 tone="info"
                 foot={`本月完成 ${overview.issue_done_this_month} 条`}
               />
+              <StatCard
+                label="环境退步公厕"
+                value={overview.env_regression_restrooms}
+                unit="座"
+                tone={overview.env_regression_restrooms > 0 ? 'danger' : 'primary'}
+                foot="最新环境记录较上次明显退步"
+              />
+              <StatCard
+                label="近 7 天环境卫生均分"
+                value={overview.avg_env_score_week.toFixed(1)}
+                unit="分"
+                tone={overview.avg_env_score_week >= 80 ? 'primary' : 'warning'}
+                foot={`已登记环境记录 ${overview.env_record_total} 条`}
+              />
             </div>
 
             <div className="grid-2">

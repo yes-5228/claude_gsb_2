@@ -1,5 +1,6 @@
 import Modal from '../../components/Modal.jsx';
 import DetailList from '../../components/DetailList.jsx';
+import EnvSummary from '../../components/EnvSummary.jsx';
 import { GradeTag, ScorePill, StatusTag } from '../../components/Tags.jsx';
 import { formatDateTime } from '../../utils/format.js';
 
@@ -37,6 +38,14 @@ export default function InspectionDetailModal({ inspection, onClose, onReportIss
           { label: '关联问题', value: `${inspection.issue_count} 条` },
           { label: '巡查备注', value: inspection.remark || '无' },
         ]}
+      />
+
+      <EnvSummary
+        env={inspection.env}
+        prevEnvScore={inspection.prev_env_score}
+        prevEnvGrade={inspection.prev_env_grade}
+        prevInspectTime={inspection.prev_inspect_time}
+        regressed={inspection.env_regressed}
       />
 
       <div className="section-title">检查项明细</div>

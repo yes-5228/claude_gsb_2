@@ -66,6 +66,11 @@ class RestroomOut(RestroomBase):
     code: str
     created_at: datetime
     updated_at: datetime
+    # 最近一次环境卫生评价（台账标记用，列表批量填充）
+    latest_env_score: float | None = None
+    latest_env_grade: str | None = None
+    latest_env_time: datetime | None = None
+    env_regressed: bool = False
 
 
 class RestroomDetail(RestroomOut):
@@ -77,3 +82,7 @@ class RestroomDetail(RestroomOut):
     avg_score: float | None = None
     open_issue_count: int = 0
     total_issue_count: int = 0
+    prev_env_score: float | None = None
+    prev_env_grade: str | None = None
+    prev_env_time: datetime | None = None
+    env_regression_count: int = 0

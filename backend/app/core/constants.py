@@ -26,6 +26,26 @@ class InspectionResult(StrEnum):
     ABNORMAL = "发现问题"
 
 
+class OdorLevel(StrEnum):
+    NONE = "无异味"
+    MILD = "轻微异味"
+    OBVIOUS = "明显异味"
+    STRONG = "强烈刺鼻"
+
+
+class FloorCondition(StrEnum):
+    DRY = "干燥洁净"
+    DAMP = "轻微潮湿"
+    WET = "明显积水湿滑"
+    DIRTY = "积水污渍"
+
+
+class VentilationStatus(StrEnum):
+    GOOD = "通风良好"
+    NORMAL = "通风一般"
+    POOR = "通风不良"
+
+
 class IssueCategory(StrEnum):
     CLEANING = "保洁不到位"
     FACILITY = "设施损坏"
@@ -97,3 +117,71 @@ OPEN_ISSUE_STATUSES: list[str] = [
 
 # 单检查项低于该分数视为不合格项
 INSPECTION_ITEM_PROBLEM_THRESHOLD = 6
+
+# ---------------------------------------------------------------------------
+# 环境卫生量化记录（异味、地面、温湿度、通风、消杀频次）
+# ---------------------------------------------------------------------------
+
+# 温湿度、消杀频次的合理取值区间，用于接口校验
+ENV_TEMPERATURE_MIN = -10.0
+ENV_TEMPERATURE_MAX = 50.0
+ENV_HUMIDITY_MIN = 0.0
+ENV_HUMIDITY_MAX = 100.0
+ENV_DISINFECTION_MIN = 0
+ENV_DISINFECTION_MAX = 12
+
+# 适宜温湿度区间：落在区间内得满分，越偏离扣分越重
+ENV_TEMPERATURE_IDEAL = (18.0, 26.0)
+ENV_HUMIDITY_IDEAL = (40.0, 70.0)
+# 每偏离适宜区间 1℃ / 1 个百分点所扣的分数
+ENV_TEMPERATURE_STEP_PENALTY = 5.0
+ENV_HUMIDITY_STEP_PENALTY = 1.5
+
+# 各异味等级对应的卫生子分（异味越重得分越低）
+ODOR_SCORES: dict[str, float] = {
+    OdorLevel.NONE: 100.0,
+    OdorLevel.MILD: 80.0,
+    OdorLevel.OBVIOUS: 50.0,
+    OdorLevel.STRONG: 20.0,
+}
+
+# 地面干湿情况对应的卫生子分
+FLOOR_SCORES: dict[str, float] = {
+    FloorCondition.DRY: 100.0,
+    FloorCondition.DAMP: 80.0,
+    FloorCondition.WET: 50.0,
+    FloorCondition.DIRTY: 20.0,
+}
+
+# 通风状态对应的卫生子分
+VENTILATION_SCORES: dict[str, float] = {
+    VentilationStatus.GOOD: 100.0,
+    VentilationStatus.NORMAL: 75.0,
+    VentilationStatus.POOR: 40.0,
+}
+
+# 消杀频次（次/日）与子分：达到建议频次即满分，不足按比例给分
+ENV_DISINFECTION_IDEAL = 3
+ENV_DISINFECTION_FULL = 100.0
+ENV_DISINFECTION_STEP = 30.0  # 每少 1 次扣 30 分
+
+# 环境卫生评价各指标权重（合计 100）
+ENV_WEIGHTS: dict[str, float] = {
+    "odor": 30.0,
+    "floor": 20.0,
+    "temperature": 10.0,
+    "humidity": 10.0,
+    "ventilation": 15.0,
+    "disinfection": 15.0,
+}
+
+# 环境卫生评价等级沿用优秀/良好/合格/不合格
+ENV_GRADE_EXCELLENT = 90.0
+ENV_GRADE_GOOD = 80.0
+ENV_GRADE_PASS = 60.0
+
+# 等级排序，用于判定是否跨档退步
+ENV_GRADE_ORDER = [GRADE_FAIL, GRADE_PASS, GRADE_GOOD, GRADE_EXCELLENT]
+
+# 较上一次同公厕记录，环境卫生分下降达到该差值即判定为明显退步
+ENV_REGRESSION_SCORE_DELTA = 15.0
