@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
+import { environmentApi } from '../../api/environment.js';
 import { inspectionApi } from '../../api/inspections.js';
 import { issueApi } from '../../api/issues.js';
 import { restroomApi } from '../../api/restrooms.js';
@@ -8,15 +9,18 @@ import DataTable from '../../components/DataTable.jsx';
 import DetailList from '../../components/DetailList.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
-import { ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
+import { DeltaText, GradeTag, RegressTag, ScorePill, SeverityTag, StatusTag } from '../../components/Tags.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
 import { useListQuery } from '../../hooks/useListQuery.js';
 import { formatDateTime } from '../../utils/format.js';
+import EnvTrendChart from '../environment/EnvTrendChart.jsx';
+import EnvironmentFormModal from '../environment/EnvironmentFormModal.jsx';
 import RestroomFormModal from './RestroomFormModal.jsx';
 
 const TABS = [
   { key: 'profile', label: '基础档案' },
   { key: 'inspections', label: '巡查记录' },
+  { key: 'environment', label: '环境卫生' },
   { key: 'issues', label: '问题记录' },
 ];
 
@@ -24,6 +28,7 @@ export default function RestroomDetailPage() {
   const { restroomId } = useParams();
   const [tab, setTab] = useState('profile');
   const [showForm, setShowForm] = useState(false);
+  const [showEnvForm, setShowEnvForm] = useState(false);
 
   const { data: restroom, loading, error, reload } = useAsync(
     () => restroomApi.detail(restroomId),
@@ -39,6 +44,18 @@ export default function RestroomDetailPage() {
     {},
     5,
   );
+  const envRecords = useListQuery(
+    (params) => environmentApi.list({ ...params, restroom_id: restroomId }),
+    {},
+    5,
+  );
+  const envTrend = useAsync(() => environmentApi.trend(restroomId), [restroomId]);
+
+  const reloadEnv = () => {
+    envRecords.reload();
+    envTrend.reload();
+    reload();
+  };
 
   return (
     <>
@@ -90,6 +107,20 @@ export default function RestroomDetailPage() {
                   <span className="unit">条</span>
                 </div>
                 <div className="foot">累计上报 {restroom.total_issue_count} 条</div>
+              </div>
+              <div className={`stat-card${restroom.env_regressed ? ' is-danger' : ' is-info'}`}>
+                <div className="label">
+                  环境卫生 {restroom.env_regressed ? <RegressTag reason={restroom.env_regress_reason} /> : null}
+                </div>
+                <div className="value">
+                  {restroom.env_score != null ? restroom.env_score.toFixed(1) : '-'}
+                  <span className="unit">分</span>
+                </div>
+                <div className="foot">
+                  {restroom.env_grade
+                    ? `${restroom.env_grade} · 累计 ${restroom.env_record_count} 条 · ${formatDateTime(restroom.env_record_time)}`
+                    : '暂无环境卫生记录'}
+                </div>
               </div>
             </div>
 
@@ -158,6 +189,71 @@ export default function RestroomDetailPage() {
               </section>
             ) : null}
 
+            {tab === 'environment' ? (
+              <>
+                <section className="card">
+                  <div className="card-title">
+                    <h3>环境卫生趋势</h3>
+                    <div className="inline">
+                      {envTrend.data?.avg_score != null ? (
+                        <span className="hint">历史均分 {envTrend.data.avg_score}</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-primary"
+                        onClick={() => setShowEnvForm(true)}
+                      >
+                        + 新增环境记录
+                      </button>
+                    </div>
+                  </div>
+                  {envTrend.loading ? (
+                    <div className="loading-block">数据加载中…</div>
+                  ) : envTrend.error ? (
+                    <div className="alert alert-error">{envTrend.error.message}</div>
+                  ) : (
+                    <EnvTrendChart points={envTrend.data?.points || []} />
+                  )}
+                </section>
+                <section className="card">
+                  <div className="card-title">
+                    <h3>环境卫生记录</h3>
+                    <Link className="hint" to="/environment">
+                      前往环境卫生模块 →
+                    </Link>
+                  </div>
+                  <DataTable
+                    loading={envRecords.loading}
+                    error={envRecords.error}
+                    rows={envRecords.items}
+                    emptyText="该公厕暂无环境卫生记录"
+                    columns={[
+                      { key: 'record_time', title: '记录时间', render: (row) => formatDateTime(row.record_time) },
+                      { key: 'recorder', title: '记录人' },
+                      { key: 'odor_label', title: '异味' },
+                      { key: 'floor_condition', title: '地面', render: (row) => <StatusTag status={row.floor_condition} /> },
+                      { key: 'ventilation', title: '通风', render: (row) => <StatusTag status={row.ventilation} /> },
+                      { key: 'disinfection_count', title: '消杀', render: (row) => `${row.disinfection_count} 次` },
+                      { key: 'score', title: '得分', render: (row) => <ScorePill score={row.score} /> },
+                      { key: 'grade', title: '评价', render: (row) => <GradeTag grade={row.grade} /> },
+                      {
+                        key: 'compare',
+                        title: '较上次',
+                        render: (row) => (
+                          <div className="inline">
+                            <DeltaText delta={row.score_delta} />
+                            {row.regressed ? <RegressTag reason={row.regress_reason} /> : null}
+                          </div>
+                        ),
+                      },
+                      { key: 'remark', title: '备注', wrap: true, render: (row) => row.remark || '-' },
+                    ]}
+                  />
+                  <Pagination meta={envRecords.meta} onPageChange={envRecords.setPage} />
+                </section>
+              </>
+            ) : null}
+
             {tab === 'issues' ? (
               <section className="card">
                 <div className="card-title">
@@ -197,6 +293,14 @@ export default function RestroomDetailPage() {
           restroom={restroom}
           onClose={() => setShowForm(false)}
           onSaved={reload}
+        />
+      ) : null}
+
+      {showEnvForm ? (
+        <EnvironmentFormModal
+          defaultRestroomId={restroomId}
+          onClose={() => setShowEnvForm(false)}
+          onSaved={reloadEnv}
         />
       ) : null}
     </>

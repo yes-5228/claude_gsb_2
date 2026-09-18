@@ -1,17 +1,18 @@
 # 公厕保洁巡查记录系统
 
-面向城市公厕管养单位的巡查记录与整改闭环管理系统，覆盖 **公厕台账 → 保洁巡查 → 问题上报 → 整改跟踪** 四条业务主线。后端为 FastAPI + SQLAlchemy，前端为 React + Vite，前后端均按模块拆分，可单独开发、单独部署。
+面向城市公厕管养单位的巡查记录与整改闭环管理系统，覆盖 **公厕台账 → 保洁巡查 → 环境卫生 → 问题上报 → 整改跟踪** 五条业务主线。后端为 FastAPI + SQLAlchemy，前端为 React + Vite，前后端均按模块拆分，可单独开发、单独部署。
 
 ## 功能模块
 
 | 模块 | 页面/入口 | 主要能力 |
 | --- | --- | --- |
 | 总览看板 | `/` | 核心指标卡、巡查与问题趋势、整改状态/分类/严重程度分布、区域运行情况、重点关注公厕、最新问题与巡查 |
-| 公厕台账 | `/restrooms`、`/restrooms/:id` | 台账增删改查、区域与状态筛选、公厕详情（档案 + 历史巡查 + 历史问题）、关联数据删除保护 |
+| 公厕台账 | `/restrooms`、`/restrooms/:id` | 台账增删改查、区域与状态筛选、最新环境卫生评价与退步标记、公厕详情（档案 + 历史巡查 + 环境卫生趋势 + 历史问题）、关联数据删除保护 |
 | 保洁巡查 | `/inspections` | 8 项检查项打分、自动折算百分制得分与等级、班次/日期/结论筛选、巡查详情、一键转问题上报 |
+| 环境卫生 | `/environment` | 异味等级、地面干湿、温湿度、通风状态与消杀频次的量化登记，自动计算环境卫生得分与评价等级，同一公厕多次记录按时间对比，明显退步自动标记并同步到台账 |
 | 问题上报 | `/issues`、`/issues/:id` | 问题上报（可关联巡查记录）、分类/程度/期限、整改流程流转、整改轨迹时间线、超期预警、追加跟进记录 |
 
-其他页面不会互相混杂：台账、巡查、问题各自独立成页，详情页再做跨模块的关联展示。
+其他页面不会互相混杂：台账、巡查、环境、问题各自独立成页，详情页再做跨模块的关联展示。
 
 ## 技术栈
 
@@ -25,11 +26,11 @@
 .
 ├── backend
 │   ├── app
-│   │   ├── api/v1/endpoints      # 路由层：restrooms / inspections / issues / stats / meta
+│   │   ├── api/v1/endpoints      # 路由层：restrooms / inspections / environment / issues / stats / meta
 │   │   ├── core                 # 配置、数据库、业务常量、领域异常
-│   │   ├── models               # ORM 模型：公厕、巡查、问题、整改流水
+│   │   ├── models               # ORM 模型：公厕、巡查、环境卫生、问题、整改流水
 │   │   ├── schemas              # Pydantic 出入参模型
-│   │   ├── services             # 业务规则层：台账、巡查、问题整改、评分、统计
+│   │   ├── services             # 业务规则层：台账、巡查、环境卫生评价、问题整改、评分、统计
 │   │   ├── seed.py              # 演示数据生成
 │   │   └── main.py              # 应用入口（含异常处理、CORS、健康检查）
 │   ├── tests                    # pytest 接口测试
@@ -40,7 +41,7 @@
 │   │   ├── api                  # 按资源拆分的接口封装 + 统一 fetch 客户端
 │   │   ├── components           # 通用组件：表格、分页、弹窗、标签、图表、时间线等
 │   │   ├── hooks                # useAsync / useListQuery / useDictionaries
-│   │   ├── pages                # dashboard / restrooms / inspections / issues 四个模块
+│   │   ├── pages                # dashboard / restrooms / inspections / environment / issues 五个模块
 │   │   ├── utils                # 时间格式化、评分换算
 │   │   └── styles/global.css
 │   ├── nginx.conf
@@ -122,15 +123,19 @@ npm run dev
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/restrooms` | 台账分页查询（keyword/district/status/grade/排序/分页） |
+| GET | `/restrooms` | 台账分页查询（keyword/district/status/grade/env_regressed/排序/分页），列表附带最新环境卫生评价 |
 | POST | `/restrooms` | 新增公厕，编号留空自动生成 `WC-0001` |
-| GET | `/restrooms/{id}` | 详情，含巡查次数、均分、未闭环问题数 |
+| GET | `/restrooms/{id}` | 详情，含巡查次数、均分、未闭环问题数、环境卫生汇总 |
 | PATCH | `/restrooms/{id}` | 局部更新 |
-| DELETE | `/restrooms/{id}?force=` | 删除；有巡查或问题记录时返回 409，`force=true` 才级联删除 |
+| DELETE | `/restrooms/{id}?force=` | 删除；有巡查、环境或问题记录时返回 409，`force=true` 才级联删除 |
 | GET | `/restrooms/meta/districts` | 区域列表（筛选下拉用） |
 | GET | `/inspections` | 巡查记录查询（restroom_id/district/inspector/shift/result/日期区间/关键字） |
 | POST | `/inspections` | 新增巡查，服务端按检查项自动算分、定级、判定结论 |
 | GET/PATCH/DELETE | `/inspections/{id}` | 详情 / 更新 / 删除 |
+| GET | `/environment-records` | 环境卫生记录查询（restroom_id/district/recorder/grade/regressed/日期区间/关键字） |
+| POST | `/environment-records` | 新增环境卫生记录，服务端自动算分、定级并与上一条记录对比判定退步 |
+| GET/PATCH/DELETE | `/environment-records/{id}` | 详情（含评分明细）/ 更新 / 删除 |
+| GET | `/environment-records/trend` | 同一公厕环境卫生时间序列对比（得分、等级、与上次差值、退步标记） |
 | GET | `/issues` | 问题查询（status/category/severity/district/overdue/open_only/日期区间/关键字） |
 | POST | `/issues` | 上报问题，自动生成编号 `WT-YYYYMMDD-001` 并写入首条整改流水 |
 | GET/PATCH/DELETE | `/issues/{id}` | 详情（含完整整改轨迹）/ 更新 / 删除 |
@@ -146,19 +151,21 @@ npm run dev
 ## 业务规则
 
 - **巡查评分**：8 个检查项各 0-10 分，得分 = 总得分 / 满分 × 100；≥90 优秀、≥80 良好、≥70 合格，其余不合格。任一检查项低于 6 分或等级为不合格时，巡查结论自动置为「发现问题」。
+- **环境卫生评分**：异味等级（0 无异味 ~ 3 刺鼻异味，权重 35）、地面干湿（干燥/微湿/积水，权重 20）、温度（舒适区间 16-28℃，权重 10）、湿度（舒适区间 40%-70%，权重 10）、通风状态（良好/一般/较差，权重 15）、当日消杀次数（≥3 次满分，权重 10），折算百分制得分；温湿度缺测时该维度不计入，按已记录维度折算。等级阈值与巡查评分一致。
+- **环境退步标记**：同一公厕每条环境记录自动与时间上一条记录对比，得分下降 ≥15 分或异味等级一次上升 ≥2 级时判定为「明显退步」，记录上写入退步原因，台账列表与公厕详情同步显示红色「退步」标记，台账支持按「仅看明显退步」筛选。
 - **问题编号**：`WT-` + 上报日期 + 当日三位流水号。
 - **整改闭环**：`待整改 → 整改中 → 待验收 → 已完成 → 已关闭`；`待验证` 阶段可被驳回退回 `整改中`，`待整改/整改中` 可直接作废关闭。每次流转都会写入一条整改流水（动作、原状态、新状态、操作人、说明），详情页以时间线呈现。
 - **超期预警**：整改期限早于当前时间且状态仍处于未闭环（待整改/整改中/待验收）时，列表与详情页显示「已超期」，看板统计超期数量。
-- **删除保护**：删除公厕时若已存在巡查或问题记录，接口返回 409 并提示数量，需要显式 `force=true` 才会级联删除；前端会二次确认。
+- **删除保护**：删除公厕时若已存在巡查、环境卫生或问题记录，接口返回 409 并提示数量，需要显式 `force=true` 才会级联删除；前端会二次确认。
 
 ## 演示数据
 
-`SEED_ON_STARTUP=true`（默认）且数据库为空时，会自动写入：10 座公厕（4 个区域、三类等级、含维修/停用状态）、近 14 天约 90 条巡查记录、13 条不同整改阶段的问题及其完整整改轨迹。数据由固定随机种子生成，结果可复现；如需重置，删除 `backend/data/app.db`（或 `docker compose down -v`）后重启即可。
+`SEED_ON_STARTUP=true`（默认）且数据库为空时，会自动写入：10 座公厕（4 个区域、三类等级、含维修/停用状态）、近 14 天约 90 条巡查记录、近 14 天约 70 条环境卫生量化记录（含一座固定演示明显退步的公厕）、13 条不同整改阶段的问题及其完整整改轨迹。数据由固定随机种子生成，结果可复现；如需重置，删除 `backend/data/app.db`（或 `docker compose down -v`）后重启即可。
 
 ## 测试与验证
 
 ```bash
-cd backend && pytest -q          # 接口测试（覆盖台账 CRUD、删除保护、评分、流程流转、统计）
+cd backend && pytest -q          # 接口测试（覆盖台账 CRUD、删除保护、评分、环境退步标记、流程流转、统计）
 cd frontend && npm run build     # 生产构建
 ```
 

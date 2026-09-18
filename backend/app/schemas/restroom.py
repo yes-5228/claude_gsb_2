@@ -66,10 +66,15 @@ class RestroomOut(RestroomBase):
     code: str
     created_at: datetime
     updated_at: datetime
+    # 最新一条环境卫生记录的评价（台账列表展示用，无记录时为空）
+    env_score: float | None = None
+    env_grade: str | None = None
+    env_record_time: datetime | None = None
+    env_regressed: bool = False
 
 
 class RestroomDetail(RestroomOut):
-    """台账详情，附带巡查与问题的汇总信息。"""
+    """台账详情，附带巡查、问题与环境卫生的汇总信息。"""
 
     inspection_count: int = 0
     latest_inspection_time: datetime | None = None
@@ -77,3 +82,5 @@ class RestroomDetail(RestroomOut):
     avg_score: float | None = None
     open_issue_count: int = 0
     total_issue_count: int = 0
+    env_record_count: int = 0
+    env_regress_reason: str | None = None

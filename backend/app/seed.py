@@ -8,18 +8,21 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import (
     INSPECTION_CHECK_ITEMS,
+    FloorCondition,
     IssueCategory,
     IssueSeverity,
     IssueStatus,
     RestroomGrade,
     RestroomStatus,
     Shift,
+    VentilationStatus,
 )
 from app.models import Restroom
+from app.schemas.environment import EnvironmentRecordCreate
 from app.schemas.inspection import InspectionCreate, InspectionItem
 from app.schemas.issue import IssueCreate, IssueStatusUpdate
 from app.schemas.restroom import RestroomCreate
-from app.services import inspection_service, issue_service, restroom_service
+from app.services import environment_service, inspection_service, issue_service, restroom_service
 
 RANDOM_SEED = 20240913
 
@@ -97,6 +100,53 @@ def _pick_problem(items: list[InspectionItem]) -> str | None:
     return min(pool, key=lambda item: item.score).name
 
 
+def _build_env_payload(
+    rng: random.Random, restroom_id: int, quality: float, moment: datetime
+) -> EnvironmentRecordCreate:
+    """按公厕整体保洁质量生成一条与之相符的环境卫生记录。"""
+    if quality >= 8.6:
+        odor = 0
+    elif quality >= 7.4:
+        odor = rng.choice([0, 1])
+    elif quality >= 6.0:
+        odor = rng.choice([1, 2])
+    else:
+        odor = rng.choice([2, 3])
+    if quality >= 8.0:
+        floor = FloorCondition.DRY
+    elif quality >= 6.5:
+        floor = rng.choice([FloorCondition.DRY, FloorCondition.DAMP])
+    elif quality >= 5.0:
+        floor = FloorCondition.DAMP
+    else:
+        floor = rng.choice([FloorCondition.DAMP, FloorCondition.WET])
+    if quality >= 8.2:
+        ventilation = VentilationStatus.GOOD
+    elif quality >= 6.8:
+        ventilation = rng.choice([VentilationStatus.GOOD, VentilationStatus.FAIR])
+    elif quality >= 5.5:
+        ventilation = VentilationStatus.FAIR
+    else:
+        ventilation = rng.choice([VentilationStatus.FAIR, VentilationStatus.POOR])
+    if quality >= 7.5:
+        disinfection = rng.randint(2, 4)
+    elif quality >= 6.0:
+        disinfection = rng.randint(1, 3)
+    else:
+        disinfection = rng.randint(0, 1)
+    return EnvironmentRecordCreate(
+        restroom_id=restroom_id,
+        recorder=rng.choice(INSPECTORS),
+        record_time=moment,
+        odor_level=odor,
+        floor_condition=floor,
+        temperature=round(rng.uniform(24.0, 33.0), 1),
+        humidity=float(rng.randint(45, 88)),
+        ventilation=ventilation,
+        disinfection_count=disinfection,
+    )
+
+
 def seed_database(db: Session, *, reset: bool = False) -> int:
     """写入演示数据，返回新增的问题条数；已有数据时默认跳过。"""
     existing = db.scalar(select(func.count()).select_from(Restroom)) or 0
@@ -154,6 +204,58 @@ def seed_database(db: Session, *, reset: bool = False) -> int:
                 ),
             )
             inspection_ids.append((room.id, inspection.id))
+
+    # 环境卫生量化记录：与保洁质量正相关，覆盖近 14 天
+    regress_demo = next(room for room in restrooms if room.name == "西城集贸市场公共厕所")
+    for offset in range(13, -1, -1):
+        day = now - timedelta(days=offset)
+        for room in restrooms:
+            if room.status == RestroomStatus.CLOSED:
+                continue
+            if room.id == regress_demo.id and offset <= 1:
+                continue  # 该公厕最近两天改用固定数据演示明显退步
+            if rng.random() < 0.45:
+                continue
+            quality = quality_by_restroom[room.id] + rng.uniform(-1.2, 0.8)
+            if rng.random() < 0.1:
+                quality -= 3.0
+            moment = day.replace(hour=rng.choice([7, 11, 15, 18]), minute=rng.choice([10, 25, 40]))
+            if moment > now:
+                # 当天的记录不晚于当前时间，保证新增记录能按时间正确对比
+                moment = now - timedelta(minutes=rng.randint(5, 90))
+            environment_service.create_record(db, _build_env_payload(rng, room.id, quality, moment))
+
+    # 固定演示一座公厕的明显退步：前一天环境良好，最近一次记录全面恶化
+    environment_service.create_record(
+        db,
+        EnvironmentRecordCreate(
+            restroom_id=regress_demo.id,
+            recorder="张伟",
+            record_time=now - timedelta(days=1, hours=2),
+            odor_level=0,
+            floor_condition=FloorCondition.DRY,
+            temperature=27.0,
+            humidity=58.0,
+            ventilation=VentilationStatus.GOOD,
+            disinfection_count=3,
+            remark="例行环境检查，状态良好",
+        ),
+    )
+    environment_service.create_record(
+        db,
+        EnvironmentRecordCreate(
+            restroom_id=regress_demo.id,
+            recorder="张伟",
+            record_time=now - timedelta(hours=2),
+            odor_level=3,
+            floor_condition=FloorCondition.WET,
+            temperature=33.5,
+            humidity=92.0,
+            ventilation=VentilationStatus.POOR,
+            disinfection_count=0,
+            remark="雨天返潮地面积水，排风故障未消杀，异味刺鼻",
+        ),
+    )
 
     created = 0
     for restroom_id, inspection_id in inspection_ids:

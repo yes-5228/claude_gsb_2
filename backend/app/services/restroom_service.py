@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.constants import OPEN_ISSUE_STATUSES
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
-from app.models import Inspection, Issue, Restroom
+from app.models import EnvironmentRecord, Inspection, Issue, Restroom
 from app.schemas.restroom import RestroomCreate, RestroomDetail, RestroomOut, RestroomUpdate
 
 SORTABLE_FIELDS = {
@@ -43,6 +43,7 @@ def list_restrooms(
     district: str | None = None,
     status: str | None = None,
     grade: str | None = None,
+    env_regressed: bool | None = None,
     page: int = 1,
     page_size: int = 10,
     sort_by: str = "created_at",
@@ -65,12 +66,36 @@ def list_restrooms(
         stmt = stmt.where(Restroom.status == status)
     if grade:
         stmt = stmt.where(Restroom.grade == grade)
+    if env_regressed is not None:
+        ids = _regressed_env_restroom_ids()
+        stmt = stmt.where(Restroom.id.in_(ids) if env_regressed else Restroom.id.notin_(ids))
 
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     column = SORTABLE_FIELDS.get(sort_by, Restroom.created_at)
     stmt = stmt.order_by(column.desc() if order == "desc" else column.asc(), Restroom.id.desc())
     rows = list(db.scalars(stmt.offset((page - 1) * page_size).limit(page_size)))
     return rows, total
+
+
+def _regressed_env_restroom_ids():
+    """最新一条环境卫生记录被标记为明显退步的公厕 id 子查询。"""
+    latest = (
+        select(
+            EnvironmentRecord.restroom_id.label("restroom_id"),
+            func.max(EnvironmentRecord.record_time).label("max_time"),
+        )
+        .group_by(EnvironmentRecord.restroom_id)
+        .subquery()
+    )
+    return (
+        select(EnvironmentRecord.restroom_id)
+        .join(
+            latest,
+            (EnvironmentRecord.restroom_id == latest.c.restroom_id)
+            & (EnvironmentRecord.record_time == latest.c.max_time),
+        )
+        .where(EnvironmentRecord.regressed.is_(True))
+    )
 
 
 def list_districts(db: Session) -> list[str]:
@@ -107,10 +132,15 @@ def delete_restroom(db: Session, restroom_id: int, *, force: bool = False) -> No
     issue_count = db.scalar(
         select(func.count()).select_from(Issue).where(Issue.restroom_id == restroom_id)
     ) or 0
-    if (inspection_count or issue_count) and not force:
+    env_count = db.scalar(
+        select(func.count())
+        .select_from(EnvironmentRecord)
+        .where(EnvironmentRecord.restroom_id == restroom_id)
+    ) or 0
+    if (inspection_count or issue_count or env_count) and not force:
         raise ConflictError(
-            f"该公厕已有 {inspection_count} 条巡查记录、{issue_count} 条问题记录，"
-            "确需删除请使用 force=true"
+            f"该公厕已有 {inspection_count} 条巡查记录、{issue_count} 条问题记录、"
+            f"{env_count} 条环境卫生记录，确需删除请使用 force=true"
         )
     db.delete(restroom)
     db.commit()
@@ -138,17 +168,34 @@ def get_restroom_detail(db: Session, restroom_id: int) -> RestroomDetail:
     total_issue_count = db.scalar(
         select(func.count()).select_from(Issue).where(Issue.restroom_id == restroom_id)
     ) or 0
+    env_record_count = db.scalar(
+        select(func.count())
+        .select_from(EnvironmentRecord)
+        .where(EnvironmentRecord.restroom_id == restroom_id)
+    ) or 0
+    latest_env = db.scalars(
+        select(EnvironmentRecord)
+        .where(EnvironmentRecord.restroom_id == restroom_id)
+        .order_by(EnvironmentRecord.record_time.desc(), EnvironmentRecord.id.desc())
+        .limit(1)
+    ).first()
 
     base = RestroomOut.model_validate(restroom).model_dump()
-    return RestroomDetail(
-        **base,
+    base.update(
         inspection_count=inspection_count,
         latest_inspection_time=latest.inspect_time if latest else None,
         latest_inspection_score=latest.score if latest else None,
         avg_score=round(float(avg_score), 1) if avg_score is not None else None,
         open_issue_count=open_issue_count,
         total_issue_count=total_issue_count,
+        env_record_count=env_record_count,
+        env_score=latest_env.score if latest_env else None,
+        env_grade=latest_env.grade if latest_env else None,
+        env_record_time=latest_env.record_time if latest_env else None,
+        env_regressed=bool(latest_env.regressed) if latest_env else False,
+        env_regress_reason=latest_env.regress_reason if latest_env else None,
     )
+    return RestroomDetail(**base)
 
 
 def touch(db: Session, restroom_id: int) -> None:

@@ -6,14 +6,14 @@ import DataTable from '../../components/DataTable.jsx';
 import Field from '../../components/Field.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import Pagination from '../../components/Pagination.jsx';
-import { StatusTag } from '../../components/Tags.jsx';
+import { GradeTag, RegressTag, StatusTag } from '../../components/Tags.jsx';
 import { useToast } from '../../components/Toast.jsx';
 import { useAsync } from '../../hooks/useAsync.js';
 import { useDictionaries } from '../../hooks/useDictionaries.js';
 import { useListQuery } from '../../hooks/useListQuery.js';
 import RestroomFormModal from './RestroomFormModal.jsx';
 
-const DEFAULT_FILTERS = { keyword: '', district: '', status: '', grade: '' };
+const DEFAULT_FILTERS = { keyword: '', district: '', status: '', grade: '', env_regressed: '' };
 
 export default function RestroomListPage() {
   const { dictionaries } = useDictionaries();
@@ -102,6 +102,16 @@ export default function RestroomListPage() {
                 ))}
               </select>
             </Field>
+            <Field label="环境卫生">
+              <select
+                value={list.filters.env_regressed}
+                onChange={(event) => list.updateFilter('env_regressed', event.target.value)}
+              >
+                <option value="">全部</option>
+                <option value="true">仅看明显退步</option>
+                <option value="false">无退步</option>
+              </select>
+            </Field>
             <button type="button" className="btn" onClick={list.resetFilters}>
               重置
             </button>
@@ -126,6 +136,20 @@ export default function RestroomListPage() {
               { key: 'status', title: '状态', render: (row) => <StatusTag status={row.status} /> },
               { key: 'manager', title: '责任人' },
               { key: 'manager_phone', title: '联系电话' },
+              {
+                key: 'environment',
+                title: '环境卫生',
+                render: (row) =>
+                  row.env_grade ? (
+                    <div className="inline">
+                      <GradeTag grade={row.env_grade} />
+                      <span className="muted">{Number(row.env_score).toFixed(1)} 分</span>
+                      {row.env_regressed ? <RegressTag /> : null}
+                    </div>
+                  ) : (
+                    <span className="muted">未记录</span>
+                  ),
+              },
               { key: 'open_hours', title: '开放时间' },
               {
                 key: 'facility',

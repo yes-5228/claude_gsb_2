@@ -43,6 +43,12 @@ export const STATUS_TONES = {
   已关闭: 'tag-neutral',
   正常: 'tag-success',
   发现问题: 'tag-danger',
+  干燥: 'tag-success',
+  微湿: 'tag-warning',
+  积水: 'tag-danger',
+  良好: 'tag-success',
+  一般: 'tag-warning',
+  较差: 'tag-danger',
 };
 
 export const SEVERITY_TONES = {

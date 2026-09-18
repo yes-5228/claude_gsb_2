@@ -26,6 +26,29 @@ class InspectionResult(StrEnum):
     ABNORMAL = "发现问题"
 
 
+class FloorCondition(StrEnum):
+    DRY = "干燥"
+    DAMP = "微湿"
+    WET = "积水"
+
+
+class VentilationStatus(StrEnum):
+    GOOD = "良好"
+    FAIR = "一般"
+    POOR = "较差"
+
+
+# 异味等级：数值越大异味越重，便于量化对比
+ODOR_LEVELS: dict[int, str] = {
+    0: "无异味",
+    1: "轻微异味",
+    2: "明显异味",
+    3: "刺鼻异味",
+}
+ODOR_LEVEL_MIN = min(ODOR_LEVELS)
+ODOR_LEVEL_MAX = max(ODOR_LEVELS)
+
+
 class IssueCategory(StrEnum):
     CLEANING = "保洁不到位"
     FACILITY = "设施损坏"
@@ -97,3 +120,19 @@ OPEN_ISSUE_STATUSES: list[str] = [
 
 # 单检查项低于该分数视为不合格项
 INSPECTION_ITEM_PROBLEM_THRESHOLD = 6
+
+# 环境卫生评分权重（满分 100）：异味 35、地面 20、温度 10、湿度 10、通风 15、消杀 10
+ENV_WEIGHT_ODOR = 35
+ENV_WEIGHT_FLOOR = 20
+ENV_WEIGHT_TEMPERATURE = 10
+ENV_WEIGHT_HUMIDITY = 10
+ENV_WEIGHT_VENTILATION = 15
+ENV_WEIGHT_DISINFECTION = 10
+
+# 温度舒适区间（℃）与湿度舒适区间（%），超出区间按偏离程度扣分
+ENV_TEMP_COMFORT = (16.0, 28.0)
+ENV_HUMIDITY_COMFORT = (40.0, 70.0)
+
+# 明显退步判定：得分较上一次下降超过该分值，或异味等级一次上升超过该级数
+ENV_REGRESS_SCORE_DROP = 15.0
+ENV_REGRESS_ODOR_JUMP = 2

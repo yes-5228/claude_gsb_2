@@ -10,12 +10,15 @@ from app.core.constants import (
     INSPECTION_CHECK_ITEMS,
     INSPECTION_ITEM_MAX_SCORE,
     ISSUE_TRANSITIONS,
+    ODOR_LEVELS,
+    FloorCondition,
     IssueCategory,
     IssueSeverity,
     IssueStatus,
     RestroomGrade,
     RestroomStatus,
     Shift,
+    VentilationStatus,
 )
 from app.core.database import get_db
 from app.services import inspection_service
@@ -30,6 +33,11 @@ class RestroomOption(BaseModel):
     district: str
 
 
+class OdorLevelOption(BaseModel):
+    level: int
+    label: str
+
+
 class Dictionaries(BaseModel):
     restroom_status: list[str]
     restroom_grade: list[str]
@@ -40,6 +48,9 @@ class Dictionaries(BaseModel):
     inspection_check_items: list[str]
     inspection_item_max_score: int
     issue_transitions: dict[str, list[str]]
+    odor_levels: list[OdorLevelOption]
+    floor_conditions: list[str]
+    ventilation_statuses: list[str]
 
 
 @router.get("/dictionaries", response_model=Dictionaries, summary="枚举字典")
@@ -54,6 +65,9 @@ def get_dictionaries() -> Dictionaries:
         inspection_check_items=list(INSPECTION_CHECK_ITEMS),
         inspection_item_max_score=INSPECTION_ITEM_MAX_SCORE,
         issue_transitions={key: list(value) for key, value in ISSUE_TRANSITIONS.items()},
+        odor_levels=[OdorLevelOption(level=level, label=label) for level, label in ODOR_LEVELS.items()],
+        floor_conditions=[item.value for item in FloorCondition],
+        ventilation_statuses=[item.value for item in VentilationStatus],
     )
 
 

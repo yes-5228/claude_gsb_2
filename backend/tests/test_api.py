@@ -223,3 +223,114 @@ def test_dashboard_stats(client, restroom):
     }
     assert payload["top_restrooms"]
     assert "rectification_rate" in overview
+
+
+def test_environment_records_and_regression(client, restroom):
+    dictionaries = client.get("/api/v1/meta/dictionaries").json()
+    assert {item["level"] for item in dictionaries["odor_levels"]} == {0, 1, 2, 3}
+    assert "积水" in dictionaries["floor_conditions"]
+    assert "较差" in dictionaries["ventilation_statuses"]
+
+    # 第一条记录：环境良好，满分
+    good = client.post(
+        "/api/v1/environment-records",
+        json={
+            "restroom_id": restroom["id"],
+            "recorder": "李巡查",
+            "record_time": (datetime.now() - timedelta(hours=5)).isoformat(),
+            "odor_level": 0,
+            "floor_condition": "干燥",
+            "temperature": 25,
+            "humidity": 55,
+            "ventilation": "良好",
+            "disinfection_count": 3,
+        },
+    ).json()
+    assert good["score"] == 100.0
+    assert good["grade"] == "优秀"
+    assert good["regressed"] is False
+    assert good["score_delta"] is None
+    assert good["odor_label"] == "无异味"
+    assert len(good["breakdown"]) == 6
+
+    # 第二条记录：异味刺鼻、地面积水、通风较差且未消杀 → 明显退步
+    bad = client.post(
+        "/api/v1/environment-records",
+        json={
+            "restroom_id": restroom["id"],
+            "recorder": "李巡查",
+            "odor_level": 3,
+            "floor_condition": "积水",
+            "temperature": 35,
+            "humidity": 95,
+            "ventilation": "较差",
+            "disinfection_count": 0,
+            "remark": "雨天返潮，排风故障",
+        },
+    ).json()
+    assert bad["grade"] == "不合格"
+    assert bad["regressed"] is True
+    assert bad["prev_score"] == 100.0
+    assert bad["score_delta"] < 0
+    assert "下降" in bad["regress_reason"]
+    assert "异味" in bad["regress_reason"]
+
+    # 台账列表标记退步，并支持按退步筛选
+    listed = client.get("/api/v1/restrooms", params={"env_regressed": "true"}).json()
+    row = next((item for item in listed["items"] if item["id"] == restroom["id"]), None)
+    assert row is not None
+    assert row["env_regressed"] is True
+    assert row["env_grade"] == "不合格"
+    excluded = client.get("/api/v1/restrooms", params={"env_regressed": "false"}).json()
+    assert restroom["id"] not in [item["id"] for item in excluded["items"]]
+
+    # 台账详情带环境卫生汇总
+    detail = client.get(f"/api/v1/restrooms/{restroom['id']}").json()
+    assert detail["env_record_count"] == 2
+    assert detail["env_regressed"] is True
+    assert detail["env_regress_reason"]
+
+    # 同一公厕多次记录按时间对比
+    trend = client.get(
+        "/api/v1/environment-records/trend", params={"restroom_id": restroom["id"]}
+    ).json()
+    assert trend["record_count"] == 2
+    assert trend["latest_regressed"] is True
+    assert [point["score"] for point in trend["points"]] == [100.0, bad["score"]]
+    assert trend["points"][1]["score_delta"] == bad["score_delta"]
+
+    # 记录列表按退步与等级筛选
+    regressed_only = client.get(
+        "/api/v1/environment-records", params={"regressed": "true"}
+    ).json()
+    assert regressed_only["meta"]["total"] == 1
+    assert regressed_only["items"][0]["id"] == bad["id"]
+    excellent = client.get(
+        "/api/v1/environment-records",
+        params={"restroom_id": restroom["id"], "grade": "优秀"},
+    ).json()
+    assert excellent["meta"]["total"] == 1
+
+    # 更新记录后重算得分与退步标记
+    updated = client.patch(
+        f"/api/v1/environment-records/{bad['id']}",
+        json={"odor_level": 0, "ventilation": "良好", "disinfection_count": 3,
+              "floor_condition": "干燥", "temperature": 26, "humidity": 60},
+    ).json()
+    assert updated["regressed"] is False
+    assert updated["score_delta"] == 0.0
+
+    # 异味等级越界被拒绝
+    rejected = client.post(
+        "/api/v1/environment-records",
+        json={"restroom_id": restroom["id"], "recorder": "李巡查", "odor_level": 5},
+    )
+    assert rejected.status_code == 422
+
+    # 删除后趋势随之变化
+    assert client.delete(f"/api/v1/environment-records/{bad['id']}").status_code == 200
+    trend_after = client.get(
+        "/api/v1/environment-records/trend", params={"restroom_id": restroom["id"]}
+    ).json()
+    assert trend_after["record_count"] == 1
+    assert trend_after["latest_regressed"] is False

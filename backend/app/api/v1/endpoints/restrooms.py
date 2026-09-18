@@ -10,7 +10,7 @@ from app.api.deps import PaginationDep, build_meta
 from app.core.database import get_db
 from app.schemas.common import MessageOut, Page
 from app.schemas.restroom import RestroomCreate, RestroomDetail, RestroomOut, RestroomUpdate
-from app.services import restroom_service
+from app.services import environment_service, restroom_service
 
 router = APIRouter(prefix="/restrooms", tags=["公厕台账"])
 
@@ -28,6 +28,7 @@ def list_restrooms(
     district: Annotated[str | None, Query(description="所属区域")] = None,
     status: Annotated[str | None, Query(description="开放状态")] = None,
     grade: Annotated[str | None, Query(description="公厕等级")] = None,
+    env_regressed: Annotated[bool | None, Query(description="仅看环境卫生明显退步")] = None,
     sort_by: Annotated[str, Query(description="排序字段")] = "created_at",
     order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
 ) -> Page[RestroomOut]:
@@ -37,15 +38,25 @@ def list_restrooms(
         district=district,
         status=status,
         grade=grade,
+        env_regressed=env_regressed,
         page=pagination.page,
         page_size=pagination.page_size,
         sort_by=sort_by,
         order=order,
     )
-    return Page[RestroomOut](
-        items=[RestroomOut.model_validate(row) for row in rows],
-        meta=build_meta(total, pagination),
-    )
+    # 台账列表附带每座公厕最新一条环境卫生评价，明显退步的在台账中标记
+    latest_env = environment_service.latest_by_restrooms(db, [row.id for row in rows])
+    items = []
+    for row in rows:
+        item = RestroomOut.model_validate(row)
+        env = latest_env.get(row.id)
+        if env is not None:
+            item.env_score = env.score
+            item.env_grade = env.grade
+            item.env_record_time = env.record_time
+            item.env_regressed = bool(env.regressed)
+        items.append(item)
+    return Page[RestroomOut](items=items, meta=build_meta(total, pagination))
 
 
 @router.post("", response_model=RestroomOut, status_code=201, summary="新增公厕")
